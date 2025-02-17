@@ -1,76 +1,71 @@
-package websocket
+package websocket_manager
 
 import (
-	"fmt"
-	"net/http"
+	"log"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
 
-// Cấu trúc Hub quản lý các kết nối Websocket
+// Hub duy trì các máy khách đang hoạt động
 type Hub struct {
-	clients   map[*websocket.Conn]bool
+	// Client đã được đăng kí
+	clients map[*Client]bool
+
+	// Tin nhắn (sự kiện) được gửi từ client
 	broadcast chan []byte
-	mutex     sync.Mutex
-	upgrader  websocket.Upgrader
+
+	// Cấu hình nâng cấp từ HTTP sang Websocket
+	upgrader *websocket.Upgrader
+
+	sync.RWMutex
 }
 
-var WebSocketHub = &Hub{
-	clients:   make(map[*websocket.Conn]bool),
-	broadcast: make(chan []byte),
-	upgrader: websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	},
+func NewHub() *Hub {
+	return &Hub{
+		clients:   make(map[*Client]bool),
+		broadcast: make(chan []byte),
+		upgrader: &websocket.Upgrader{
+			WriteBufferSize: 1024,
+			ReadBufferSize:  1024,
+		},
+	}
 }
 
-// Xử lý khi Client kết nối vào Websocket
-func (h *Hub) HandleConnections(c *gin.Context) {
-	ws, err := h.upgrader.Upgrade(c.Writer, c.Request, nil) // Nâng cấp từ HTTP lên websocket
+func (h *Hub) registerClient(client *Client) {
+	h.Lock()
+	defer h.Unlock()
+
+	h.clients[client] = true
+}
+
+func (h *Hub) unregisterClient(client *Client) {
+	h.Lock()
+
+	defer h.Unlock()
+
+	// Nếu có client trong map thì đóng websocket của client đó lại -> xoá client đó ra khỏi map
+	if _, ok := h.clients[client]; ok {
+		client.connection.Close()
+		delete(h.clients, client)
+	}
+}
+
+func (h *Hub) ServeWS(c *gin.Context) {
+	log.Println("new connection")
+	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
+
 	if err != nil {
-		fmt.Println("Websocket upgrader error :", err)
+		log.Println(err)
 		return
 	}
-	defer ws.Close()
 
-	// thêm client vào danh sách
-	h.mutex.Lock()
-	h.clients[ws] = true
-	h.mutex.Unlock()
+	// Tạo 1 client mới
+	client := NewClient(conn, h)
 
-	fmt.Println("New Websocket connected")
+	h.registerClient(client)
 
-	for {
-		_, msg, err := ws.ReadMessage()
-		if err != nil { // Nếu lỗi thì xoá dần các client ra khỏi danh sách
-			fmt.Println("Websocket Read error: ", err)
-			h.mutex.Lock()
-			delete(h.clients, ws)
-			h.mutex.Unlock()
-			break
-		}
-		fmt.Println("Received from client:", string(msg))
-
-		// Gửi tin nhắn đến tất cả các client
-		h.broadcast <- msg
-	}
-
-}
-
-// Gửi tin nhắn đến tất cả các client
-func (h *Hub) HandleMessages() {
-	for {
-		msg := <-h.broadcast
-		h.mutex.Lock()
-		for client := range h.clients {
-			err := client.WriteMessage(websocket.TextMessage, msg)
-			if err != nil {
-				fmt.Println("Write error:", err)
-				client.Close()
-				delete(h.clients, client)
-			}
-		}
-		h.mutex.Unlock()
-	}
+	// Bắt đầu các tiến trình của client
+	go client.readMessages()
 }
