@@ -10,7 +10,6 @@ import (
 )
 
 // Cấu trúc Hub quản lý các kết nối Websocket
-
 type Hub struct {
 	clients   map[*websocket.Conn]bool
 	broadcast chan []byte
@@ -27,7 +26,6 @@ var WebSocketHub = &Hub{
 }
 
 // Xử lý khi Client kết nối vào Websocket
-
 func (h *Hub) HandleConnections(c *gin.Context) {
 	ws, err := h.upgrader.Upgrade(c.Writer, c.Request, nil) // Nâng cấp từ HTTP lên websocket
 	if err != nil {
@@ -41,7 +39,7 @@ func (h *Hub) HandleConnections(c *gin.Context) {
 	h.clients[ws] = true
 	h.mutex.Unlock()
 
-	fmt.Println("New Websocket connection")
+	fmt.Println("New Websocket connected")
 
 	for {
 		_, msg, err := ws.ReadMessage()
@@ -52,7 +50,7 @@ func (h *Hub) HandleConnections(c *gin.Context) {
 			h.mutex.Unlock()
 			break
 		}
-		fmt.Println("Received:", string(msg))
+		fmt.Println("Received from client:", string(msg))
 
 		// Gửi tin nhắn đến tất cả các client
 		h.broadcast <- msg
@@ -68,7 +66,7 @@ func (h *Hub) HandleMessages() {
 		for client := range h.clients {
 			err := client.WriteMessage(websocket.TextMessage, msg)
 			if err != nil {
-				fmt.Println("write error", err)
+				fmt.Println("Write error:", err)
 				client.Close()
 				delete(h.clients, client)
 			}
