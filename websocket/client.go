@@ -19,6 +19,7 @@ func NewClient(conn *websocket.Conn, hub *Hub) *Client {
 	}
 }
 
+// Nhận msg từ client -> server
 func (c *Client) readMessages() {
 
 	defer func() {
@@ -26,12 +27,28 @@ func (c *Client) readMessages() {
 		c.hub.unregisterClient(c)
 	}()
 	for {
-		messageType, payload, err := c.connection.ReadMessage()
+		// readMessages được sử dụng để đọc tin nhắn tiếp theo trong hàng đợi
+		_, payload, err := c.connection.ReadMessage()
 		if err != nil {
+			log.Println(err)
+			break // Break the Loop để đóng Conn & Dọn dẹp
+		}
+
+		// Đọc data từ client gửi lên và in ra tại đây
+		c.hub.broadcast <- payload
+		log.Println("Payload from client to server: ", string(payload))
+	}
+}
+
+// Gửi msg từ server -> client
+func (c *Client) writeMessages() {
+	// Trả lại msg mà client gửi lên server
+	for {
+		msg := <-c.hub.broadcast
+		if err := c.connection.WriteMessage(websocket.TextMessage, msg); err != nil {
 			log.Println(err)
 			break
 		}
-		log.Println(messageType)
-		log.Println(string(payload))
+		log.Println("sent message from server to client:", string(msg))
 	}
 }

@@ -68,4 +68,5 @@ func (h *Hub) ServeWS(c *gin.Context) {
 
 	// Bắt đầu các tiến trình của client
 	go client.readMessages()
+	go client.writeMessages()
 }
